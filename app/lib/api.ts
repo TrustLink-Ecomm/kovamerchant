@@ -13,6 +13,8 @@ import type {
   OrderStatus,
   Category,
   SubCategory,
+  PaymentConfirmResponse,
+  PaymentRejectResponse,
 } from "./types";
 
 const BASE_URL = "https://api.kovaonline.com";
@@ -122,6 +124,17 @@ export const ordersApi = {
     request<MerchantOrder>(`/api/v1/merchant/orders/${orderId}/status`, {
       method: "PUT",
       body: JSON.stringify(payload),
+    }),
+
+  confirmPayment: (orderId: string) =>
+    request<PaymentConfirmResponse>(`/api/v1/merchant/orders/${orderId}/payment/confirm`, {
+      method: "PUT",
+    }),
+
+  rejectPayment: (orderId: string, reason: string) =>
+    request<PaymentRejectResponse>(`/api/v1/merchant/orders/${orderId}/payment/reject`, {
+      method: "PUT",
+      body: JSON.stringify({ reason }),
     }),
 };
 

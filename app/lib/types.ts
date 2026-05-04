@@ -1,6 +1,6 @@
 export type MerchantStatus = "PENDING_APPROVAL" | "ACTIVE" | "SUSPENDED" | "DEACTIVATED";
 export type OrderStatus = "PENDING" | "PROCESSING" | "COMPLETED" | "CANCELLED";
-export type PaymentStatus = "PENDING" | "PAID";
+export type PaymentStatus = "PENDING" | "PAID" | "REJECTED";
 export type PaymentMethod = "MOBILE_MONEY" | "PAY_ON_DELIVERY";
 export type MomoNetwork = "MTN" | "VODAFONE" | "AIRTELTIGO";
 export type InvoiceStatus = "GENERATED" | "SENT" | "PAID";
@@ -77,6 +77,24 @@ export interface MerchantOrder {
   merchantMomo: MomoAccount | null;
   orderDate: string;
   updatedAt: string;
+  paymentTransactionId: string | null;
+  payerMomoNumber: string | null;
+  merchantConfirmedPaidAt: string | null;
+  paymentRejectionReason: string | null;
+}
+
+export interface PaymentConfirmResponse {
+  orderId: string;
+  paymentStatus: PaymentStatus;
+  paymentTransactionId: string;
+  payerMomoNumber: string;
+  merchantConfirmedPaidAt: string;
+}
+
+export interface PaymentRejectResponse {
+  orderId: string;
+  paymentStatus: PaymentStatus;
+  paymentRejectionReason: string;
 }
 
 export interface InvoiceItem {

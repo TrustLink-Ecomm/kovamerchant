@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { ordersApi } from "../../../lib/api";
-import type { MerchantOrder, OrderStatus, PaymentStatus } from "../../../lib/types";
+import type { MerchantOrder, OrderStatus } from "../../../lib/types";
 
 const STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   PENDING: ["PROCESSING", "CANCELLED"],
@@ -23,12 +23,21 @@ function statusBadge(s: OrderStatus) {
   return map[s];
 }
 
+function paymentBadge(s: string) {
+  if (s === "PAID") return "bg-emerald-50 text-emerald-700";
+  if (s === "REJECTED") return "bg-red-50 text-red-600";
+  return "bg-amber-50 text-amber-700";
+}
+
 export default function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const [order, setOrder] = useState<MerchantOrder | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectError, setRejectError] = useState<string | null>(null);
 
   useEffect(() => {
     ordersApi.get(orderId)
@@ -37,15 +46,59 @@ export default function OrderDetailPage() {
       .finally(() => setLoading(false));
   }, [orderId]);
 
-  async function updateStatus(orderStatus: OrderStatus, paymentStatus?: PaymentStatus) {
+  async function updateStatus(orderStatus: OrderStatus) {
     if (!order) return;
     setUpdating(true);
     try {
-      const updated = await ordersApi.updateStatus(orderId, { orderStatus, paymentStatus });
+      const updated = await ordersApi.updateStatus(orderId, { orderStatus });
       setOrder(updated);
     } catch (err: unknown) {
       const e = err as { message?: string };
       alert(e.message ?? "Failed to update order.");
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function handleConfirmPayment() {
+    if (!order) return;
+    setUpdating(true);
+    try {
+      const res = await ordersApi.confirmPayment(orderId);
+      setOrder((prev) => prev ? {
+        ...prev,
+        paymentStatus: res.paymentStatus,
+        paymentTransactionId: res.paymentTransactionId,
+        payerMomoNumber: res.payerMomoNumber,
+        merchantConfirmedPaidAt: res.merchantConfirmedPaidAt,
+      } : prev);
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      alert(e.message ?? "Failed to confirm payment.");
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function handleRejectPayment() {
+    if (!order || !rejectReason.trim()) {
+      setRejectError("Please enter a reason for rejection.");
+      return;
+    }
+    setUpdating(true);
+    setRejectError(null);
+    try {
+      const res = await ordersApi.rejectPayment(orderId, rejectReason.trim());
+      setOrder((prev) => prev ? {
+        ...prev,
+        paymentStatus: res.paymentStatus,
+        paymentRejectionReason: res.paymentRejectionReason,
+      } : prev);
+      setRejectOpen(false);
+      setRejectReason("");
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setRejectError(e.message ?? "Failed to reject payment.");
     } finally {
       setUpdating(false);
     }
@@ -64,6 +117,8 @@ export default function OrderDetailPage() {
   }
 
   const nextStatuses = STATUS_TRANSITIONS[order.status];
+  const canActOnPayment = order.paymentStatus === "PENDING" && order.status !== "CANCELLED";
+  const hasActions = nextStatuses.length > 0 || canActOnPayment;
 
   return (
     <div className="p-6 lg:p-8 max-w-3xl mx-auto w-full">
@@ -83,10 +138,11 @@ export default function OrderDetailPage() {
       </div>
 
       <div className="flex flex-col gap-5">
-        {/* Status actions */}
-        {(nextStatuses.length > 0 || order.paymentStatus === "PENDING") && (
+        {/* Actions */}
+        {hasActions && (
           <div className="bg-surface rounded-2xl border border-border shadow-sm p-5">
             <h2 className="text-sm font-semibold text-foreground mb-4">Actions</h2>
+
             <div className="flex flex-wrap gap-2">
               {nextStatuses.map((s) => (
                 <button
@@ -102,16 +158,59 @@ export default function OrderDetailPage() {
                   {updating ? "…" : `Mark as ${s}`}
                 </button>
               ))}
-              {order.paymentStatus === "PENDING" && order.status !== "CANCELLED" && (
-                <button
-                  onClick={() => updateStatus(order.status, "PAID")}
-                  disabled={updating}
-                  className="px-4 py-2 rounded-xl text-sm font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition disabled:opacity-60"
-                >
-                  {updating ? "…" : "Confirm Payment"}
-                </button>
+
+              {canActOnPayment && !rejectOpen && (
+                <>
+                  <button
+                    onClick={handleConfirmPayment}
+                    disabled={updating}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition disabled:opacity-60"
+                  >
+                    {updating ? "…" : "Confirm Payment"}
+                  </button>
+                  <button
+                    onClick={() => setRejectOpen(true)}
+                    disabled={updating}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold border border-red-200 text-red-600 hover:bg-red-50 transition disabled:opacity-60"
+                  >
+                    Reject Payment
+                  </button>
+                </>
               )}
             </div>
+
+            {/* Inline reject form */}
+            {rejectOpen && (
+              <div className="mt-4 pt-4 border-t border-border flex flex-col gap-3">
+                <p className="text-sm font-medium text-foreground">Reason for rejection</p>
+                <textarea
+                  value={rejectReason}
+                  onChange={(e) => { setRejectReason(e.target.value); setRejectError(null); }}
+                  rows={3}
+                  placeholder="e.g. Transaction ID not found in merchant MoMo account"
+                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 transition resize-none"
+                />
+                {rejectError && (
+                  <p className="text-xs text-red-600">{rejectError}</p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleRejectPayment}
+                    disabled={updating}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold bg-red-600 text-white hover:bg-red-700 transition disabled:opacity-60"
+                  >
+                    {updating ? "…" : "Confirm Rejection"}
+                  </button>
+                  <button
+                    onClick={() => { setRejectOpen(false); setRejectReason(""); setRejectError(null); }}
+                    disabled={updating}
+                    className="px-4 py-2 rounded-xl text-sm font-medium border border-border text-muted hover:bg-background transition disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -141,13 +240,33 @@ export default function OrderDetailPage() {
             <h2 className="text-xs font-semibold text-muted uppercase tracking-wider mb-4">Payment</h2>
             <div className="flex flex-col gap-2 text-sm">
               <InfoRow label="Method" value={order.paymentMethod.replace("_", " ")} />
-              <InfoRow label="Status" value={order.paymentStatus} />
+              <div className="flex items-start justify-between gap-4">
+                <span className="text-muted shrink-0">Status</span>
+                <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${paymentBadge(order.paymentStatus)}`}>
+                  {order.paymentStatus}
+                </span>
+              </div>
               {order.merchantMomo && (
                 <>
                   <InfoRow label="MoMo name" value={order.merchantMomo.accountName} />
                   <InfoRow label="MoMo number" value={order.merchantMomo.phoneNumber} />
                   <InfoRow label="Network" value={order.merchantMomo.network} />
                 </>
+              )}
+              {order.paymentStatus === "PAID" && order.paymentTransactionId && (
+                <InfoRow label="Transaction ID" value={order.paymentTransactionId} />
+              )}
+              {order.paymentStatus === "PAID" && order.payerMomoNumber && (
+                <InfoRow label="Payer MoMo" value={order.payerMomoNumber} />
+              )}
+              {order.paymentStatus === "PAID" && order.merchantConfirmedPaidAt && (
+                <InfoRow label="Confirmed at" value={new Date(order.merchantConfirmedPaidAt).toLocaleString("en-GH")} />
+              )}
+              {order.paymentStatus === "REJECTED" && order.paymentRejectionReason && (
+                <div className="mt-1 rounded-xl bg-red-50 border border-red-100 px-3 py-2">
+                  <p className="text-xs text-red-600 font-medium mb-0.5">Rejection reason</p>
+                  <p className="text-xs text-red-500">{order.paymentRejectionReason}</p>
+                </div>
               )}
             </div>
           </div>
