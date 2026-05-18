@@ -12,6 +12,7 @@ import type {
   UpdateOrderStatusPayload,
   SaveMomoPayload,
   ChangePasswordPayload,
+  ChangePasswordResponse,
   UpdateProfilePayload,
   OrderStatus,
   Category,
@@ -75,7 +76,7 @@ export const authApi = {
     request<LoginResponse>("/api/v1/merchant/auth/re-authenticate"),
 
   changePassword: (payload: ChangePasswordPayload) =>
-    request<void>("/api/v1/merchant/auth/change-password", {
+    request<ChangePasswordResponse>("/api/v1/merchant/auth/change-password", {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
@@ -85,7 +86,7 @@ export const authApi = {
 
 export const merchantApi = {
   updateProfile: (payload: UpdateProfilePayload) =>
-    request<MerchantInfo>("/api/v1/merchant/profile", {
+    request<MerchantInfo>("/api/v1/merchant/dashboard/profile", {
       method: "PUT",
       body: JSON.stringify(payload),
     }),

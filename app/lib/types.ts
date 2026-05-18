@@ -195,10 +195,20 @@ export interface SaveMomoPayload {
 }
 
 export interface ChangePasswordPayload {
-  currentPassword: string;
+  oldPassword: string;
   newPassword: string;
+  confirmNewPassword: string;
+}
+
+export interface ChangePasswordResponse {
+  success: boolean;
+  message: string;
 }
 
 export interface UpdateProfilePayload {
-  logoUrl?: string | null;
+  businessName: string;
+  email: string;
+  phoneNumber: string;
+  description: string | null;
+  logoUrl: string | null;
 }

@@ -53,10 +53,10 @@ export default function SettingsPage() {
   const [logoSuccess, setLogoSuccess] = useState(false);
 
   // Change password state
-  const [pwForm, setPwForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [pwForm, setPwForm] = useState({ oldPassword: "", newPassword: "", confirmNewPassword: "" });
   const [savingPw, setSavingPw] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
-  const [pwSuccess, setPwSuccess] = useState(false);
+  const [pwSuccess, setPwSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem("kova_merchant");
@@ -75,13 +75,19 @@ export default function SettingsPage() {
     localStorage.setItem("kova_merchant", JSON.stringify(next));
   }
 
-  async function handleLogoFile(file: File) {
+  async function saveLogo(logoUrl: string | null) {
+    if (!merchant) return;
     setLogoError(null);
     setLogoSuccess(false);
     setUploadingLogo(true);
     try {
-      const url = await uploadToCloudinary(file);
-      const updated = await merchantApi.updateProfile({ logoUrl: url });
+      const updated = await merchantApi.updateProfile({
+        businessName: merchant.businessName,
+        email: merchant.email,
+        phoneNumber: merchant.phoneNumber,
+        description: merchant.description,
+        logoUrl,
+      });
       persistMerchant(updated);
       setLogoSuccess(true);
       setTimeout(() => setLogoSuccess(false), 3000);
@@ -93,17 +99,15 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleRemoveLogo() {
+  async function handleLogoFile(file: File) {
     setLogoError(null);
-    setLogoSuccess(false);
     setUploadingLogo(true);
     try {
-      const updated = await merchantApi.updateProfile({ logoUrl: null });
-      persistMerchant(updated);
+      const url = await uploadToCloudinary(file);
+      await saveLogo(url);
     } catch (err: unknown) {
       const e = err as { message?: string };
-      setLogoError(e.message ?? "Failed to remove profile picture.");
-    } finally {
+      setLogoError(e.message ?? "Failed to upload image.");
       setUploadingLogo(false);
     }
   }
@@ -129,33 +133,30 @@ export default function SettingsPage() {
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault();
     setPwError(null);
-    setPwSuccess(false);
+    setPwSuccess(null);
 
     if (pwForm.newPassword.length < 8) {
       setPwError("New password must be at least 8 characters.");
       return;
     }
-    if (pwForm.newPassword !== pwForm.confirmPassword) {
+    if (pwForm.newPassword !== pwForm.confirmNewPassword) {
       setPwError("New password and confirmation do not match.");
       return;
     }
-    if (pwForm.newPassword === pwForm.currentPassword) {
-      setPwError("New password must be different from your current password.");
+    if (pwForm.newPassword === pwForm.oldPassword) {
+      setPwError("New password must be different from your old password.");
       return;
     }
 
     setSavingPw(true);
     try {
-      await authApi.changePassword({
-        currentPassword: pwForm.currentPassword,
-        newPassword: pwForm.newPassword,
-      });
-      setPwForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-      setPwSuccess(true);
-      setTimeout(() => setPwSuccess(false), 3000);
+      const res = await authApi.changePassword(pwForm);
+      setPwForm({ oldPassword: "", newPassword: "", confirmNewPassword: "" });
+      setPwSuccess(res.message ?? "Password updated successfully.");
+      setTimeout(() => setPwSuccess(null), 3000);
     } catch (err: unknown) {
       const e = err as { status?: number; message?: string };
-      if (e.status === 401) setPwError("Your current password is incorrect.");
+      if (e.status === 401) setPwError("Your old password is incorrect.");
       else setPwError(e.message ?? "Failed to change password.");
     } finally {
       setSavingPw(false);
@@ -216,7 +217,7 @@ export default function SettingsPage() {
                   {merchant.logoUrl && (
                     <button
                       type="button"
-                      onClick={handleRemoveLogo}
+                      onClick={() => saveLogo(null)}
                       disabled={uploadingLogo}
                       className="px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted hover:border-red-200 hover:text-red-600 transition disabled:opacity-60"
                     >
@@ -283,13 +284,13 @@ export default function SettingsPage() {
           </div>
 
           <form onSubmit={handleChangePassword} className="flex flex-col gap-4">
-            <Field label="Current Password">
+            <Field label="Old Password">
               <input
                 type="password"
                 required
                 autoComplete="current-password"
-                value={pwForm.currentPassword}
-                onChange={(e) => setPwForm((f) => ({ ...f, currentPassword: e.target.value }))}
+                value={pwForm.oldPassword}
+                onChange={(e) => setPwForm((f) => ({ ...f, oldPassword: e.target.value }))}
                 placeholder="••••••••"
                 className={inputCls}
               />
@@ -314,8 +315,8 @@ export default function SettingsPage() {
                 required
                 autoComplete="new-password"
                 minLength={8}
-                value={pwForm.confirmPassword}
-                onChange={(e) => setPwForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+                value={pwForm.confirmNewPassword}
+                onChange={(e) => setPwForm((f) => ({ ...f, confirmNewPassword: e.target.value }))}
                 placeholder="Re-enter new password"
                 className={inputCls}
               />
@@ -326,7 +327,7 @@ export default function SettingsPage() {
             )}
             {pwSuccess && (
               <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3 text-sm text-emerald-700">
-                Password changed successfully.
+                {pwSuccess}
               </div>
             )}
 
