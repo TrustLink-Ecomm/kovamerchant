@@ -193,3 +193,12 @@ export interface SaveMomoPayload {
   phoneNumber: string;
   network: MomoNetwork;
 }
+
+export interface ChangePasswordPayload {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface UpdateProfilePayload {
+  logoUrl?: string | null;
+}

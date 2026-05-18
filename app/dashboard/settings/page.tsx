@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { momoApi } from "../../lib/api";
+import { useEffect, useRef, useState } from "react";
+import { authApi, merchantApi, momoApi } from "../../lib/api";
 import type { MerchantInfo, MomoAccount, MomoNetwork } from "../../lib/types";
 
 const NETWORKS: MomoNetwork[] = ["MTN", "VODAFONE", "AIRTELTIGO"];
+
+const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME ?? "";
+const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? "";
 
 const inputCls = "w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted outline-none focus:border-brand focus:ring-2 focus:ring-brand/10 transition";
 
@@ -17,6 +20,24 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+async function uploadToCloudinary(file: File): Promise<string> {
+  if (!CLOUD_NAME || !UPLOAD_PRESET) {
+    throw new Error("Cloudinary is not configured. Set NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME and NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET.");
+  }
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("upload_preset", UPLOAD_PRESET);
+
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+    method: "POST",
+    body: fd,
+  });
+
+  if (!res.ok) throw new Error("Upload failed.");
+  const data = await res.json();
+  return data.secure_url as string;
+}
+
 export default function SettingsPage() {
   const [merchant, setMerchant] = useState<MerchantInfo | null>(null);
   const [momo, setMomo] = useState<MomoAccount | null>(null);
@@ -24,6 +45,18 @@ export default function SettingsPage() {
   const [savingMomo, setSavingMomo] = useState(false);
   const [momoSuccess, setMomoSuccess] = useState(false);
   const [momoError, setMomoError] = useState<string | null>(null);
+
+  // Profile picture state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [logoError, setLogoError] = useState<string | null>(null);
+  const [logoSuccess, setLogoSuccess] = useState(false);
+
+  // Change password state
+  const [pwForm, setPwForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
+  const [savingPw, setSavingPw] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSuccess, setPwSuccess] = useState(false);
 
   useEffect(() => {
     const stored = localStorage.getItem("kova_merchant");
@@ -36,6 +69,44 @@ export default function SettingsPage() {
       })
       .catch(() => {/* no momo account yet */});
   }, []);
+
+  function persistMerchant(next: MerchantInfo) {
+    setMerchant(next);
+    localStorage.setItem("kova_merchant", JSON.stringify(next));
+  }
+
+  async function handleLogoFile(file: File) {
+    setLogoError(null);
+    setLogoSuccess(false);
+    setUploadingLogo(true);
+    try {
+      const url = await uploadToCloudinary(file);
+      const updated = await merchantApi.updateProfile({ logoUrl: url });
+      persistMerchant(updated);
+      setLogoSuccess(true);
+      setTimeout(() => setLogoSuccess(false), 3000);
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setLogoError(e.message ?? "Failed to update profile picture.");
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
+  async function handleRemoveLogo() {
+    setLogoError(null);
+    setLogoSuccess(false);
+    setUploadingLogo(true);
+    try {
+      const updated = await merchantApi.updateProfile({ logoUrl: null });
+      persistMerchant(updated);
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setLogoError(e.message ?? "Failed to remove profile picture.");
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
 
   async function handleSaveMomo(e: React.FormEvent) {
     e.preventDefault();
@@ -55,6 +126,42 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPwError(null);
+    setPwSuccess(false);
+
+    if (pwForm.newPassword.length < 8) {
+      setPwError("New password must be at least 8 characters.");
+      return;
+    }
+    if (pwForm.newPassword !== pwForm.confirmPassword) {
+      setPwError("New password and confirmation do not match.");
+      return;
+    }
+    if (pwForm.newPassword === pwForm.currentPassword) {
+      setPwError("New password must be different from your current password.");
+      return;
+    }
+
+    setSavingPw(true);
+    try {
+      await authApi.changePassword({
+        currentPassword: pwForm.currentPassword,
+        newPassword: pwForm.newPassword,
+      });
+      setPwForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setPwSuccess(true);
+      setTimeout(() => setPwSuccess(false), 3000);
+    } catch (err: unknown) {
+      const e = err as { status?: number; message?: string };
+      if (e.status === 401) setPwError("Your current password is incorrect.");
+      else setPwError(e.message ?? "Failed to change password.");
+    } finally {
+      setSavingPw(false);
+    }
+  }
+
   return (
     <div className="p-6 lg:p-8 max-w-2xl mx-auto w-full">
       <div className="mb-8">
@@ -63,25 +170,88 @@ export default function SettingsPage() {
       </div>
 
       <div className="flex flex-col gap-6">
-        {/* Profile card (read-only) */}
+        {/* Profile card */}
         {merchant && (
           <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
             <h2 className="text-sm font-semibold text-foreground mb-5">Store Profile</h2>
             <div className="flex items-center gap-4 mb-6">
-              <div className="w-14 h-14 rounded-2xl bg-brand flex items-center justify-center shrink-0">
-                <span className="text-white font-bold text-xl">
-                  {merchant.businessName.charAt(0).toUpperCase()}
-                </span>
+              <div className="relative w-20 h-20 shrink-0">
+                {merchant.logoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={merchant.logoUrl}
+                    alt={merchant.businessName}
+                    className={`w-20 h-20 rounded-2xl object-cover border border-border ${uploadingLogo ? "opacity-50" : ""}`}
+                  />
+                ) : (
+                  <div className={`w-20 h-20 rounded-2xl bg-brand flex items-center justify-center ${uploadingLogo ? "opacity-50" : ""}`}>
+                    <span className="text-white font-bold text-2xl">
+                      {merchant.businessName.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                {uploadingLogo && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="w-6 h-6 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                  </div>
+                )}
               </div>
-              <div>
-                <p className="font-semibold text-foreground text-base">{merchant.businessName}</p>
+
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-foreground text-base truncate">{merchant.businessName}</p>
                 <span className={`inline-block mt-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
                   merchant.status === "ACTIVE" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-600"
                 }`}>
                   {merchant.status}
                 </span>
+                <div className="flex gap-2 mt-3">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingLogo}
+                    className="px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:border-brand hover:text-brand transition disabled:opacity-60"
+                  >
+                    {merchant.logoUrl ? "Change photo" : "Upload photo"}
+                  </button>
+                  {merchant.logoUrl && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLogo}
+                      disabled={uploadingLogo}
+                      className="px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted hover:border-red-200 hover:text-red-600 transition disabled:opacity-60"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleLogoFile(f);
+                    e.target.value = "";
+                  }}
+                />
               </div>
             </div>
+
+            {logoError && (
+              <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-600 mb-4">{logoError}</div>
+            )}
+            {logoSuccess && (
+              <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3 text-sm text-emerald-700 mb-4">
+                Profile picture updated.
+              </div>
+            )}
+            {!CLOUD_NAME && (
+              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 mb-4">
+                Cloudinary is not configured. Add <code className="font-mono">NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME</code> and <code className="font-mono">NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET</code> to your <code className="font-mono">.env.local</code>.
+              </p>
+            )}
+
             <div className="flex flex-col gap-3">
               {[
                 { label: "Email", value: merchant.email },
@@ -104,6 +274,71 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
+
+        {/* Change password */}
+        <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">
+          <div className="mb-5">
+            <h2 className="text-sm font-semibold text-foreground">Change Password</h2>
+            <p className="text-xs text-muted mt-0.5">Use at least 8 characters</p>
+          </div>
+
+          <form onSubmit={handleChangePassword} className="flex flex-col gap-4">
+            <Field label="Current Password">
+              <input
+                type="password"
+                required
+                autoComplete="current-password"
+                value={pwForm.currentPassword}
+                onChange={(e) => setPwForm((f) => ({ ...f, currentPassword: e.target.value }))}
+                placeholder="••••••••"
+                className={inputCls}
+              />
+            </Field>
+
+            <Field label="New Password">
+              <input
+                type="password"
+                required
+                autoComplete="new-password"
+                minLength={8}
+                value={pwForm.newPassword}
+                onChange={(e) => setPwForm((f) => ({ ...f, newPassword: e.target.value }))}
+                placeholder="At least 8 characters"
+                className={inputCls}
+              />
+            </Field>
+
+            <Field label="Confirm New Password">
+              <input
+                type="password"
+                required
+                autoComplete="new-password"
+                minLength={8}
+                value={pwForm.confirmPassword}
+                onChange={(e) => setPwForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+                placeholder="Re-enter new password"
+                className={inputCls}
+              />
+            </Field>
+
+            {pwError && (
+              <div className="rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-sm text-red-600">{pwError}</div>
+            )}
+            {pwSuccess && (
+              <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3 text-sm text-emerald-700">
+                Password changed successfully.
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={savingPw}
+              className="w-full py-3 rounded-xl bg-brand text-white text-sm font-semibold hover:bg-brand-light transition disabled:opacity-60 mt-1"
+            >
+              {savingPw ? "Updating…" : "Update Password"}
+            </button>
+          </form>
+        </div>
 
         {/* MoMo account */}
         <div className="bg-surface rounded-2xl border border-border shadow-sm p-6">

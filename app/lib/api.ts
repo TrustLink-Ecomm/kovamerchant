@@ -4,12 +4,15 @@ import type {
   MerchantProduct,
   MerchantOrder,
   MerchantInvoice,
+  MerchantInfo,
   MomoAccount,
   PagedResponse,
   CreateProductPayload,
   UpdateProductPayload,
   UpdateOrderStatusPayload,
   SaveMomoPayload,
+  ChangePasswordPayload,
+  UpdateProfilePayload,
   OrderStatus,
   Category,
   SubCategory,
@@ -70,6 +73,22 @@ export const authApi = {
 
   reAuthenticate: () =>
     request<LoginResponse>("/api/v1/merchant/auth/re-authenticate"),
+
+  changePassword: (payload: ChangePasswordPayload) =>
+    request<void>("/api/v1/merchant/auth/change-password", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+};
+
+// ── Merchant Profile ──────────────────────────────────────────────────────────
+
+export const merchantApi = {
+  updateProfile: (payload: UpdateProfilePayload) =>
+    request<MerchantInfo>("/api/v1/merchant/profile", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
 };
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
